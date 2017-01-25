@@ -10,12 +10,13 @@ from keras.models import Model
 from keras.applications.resnet50 import ResNet50
 from keras.applications.vgg16 import VGG16
 import resnet
+from utils import PerClassMetric
 
-def train(data_dir, model_name, pretrained, optimizer_name):
+def train(data_dir, model_name, pretrained, optimizer_name, weight_path):
 	# parameters
 	batch_size = 32
 	nb_classes = 12
-	nb_epoch = 100
+	nb_epoch = 50
 	data_augmentation = False
 
 	# input image dimensions and channels
@@ -51,6 +52,7 @@ def train(data_dir, model_name, pretrained, optimizer_name):
 		x = Flatten(name="flatten")(x)
 		x = Dense(nb_classes, activation='softmax', name='fc12')(x)
 		model = Model(input=base_model.input, output=x)
+		# model.load_weights("finetune/data_0.45/weights_keras_resnet1sgd.best.hdf5")
 	elif model_name == "VGG16":
 		if pretrained:
 			base_model = VGG16(include_top=False, weights="imagenet", input_tensor=None, input_shape=(224, 224, 3))
@@ -66,34 +68,41 @@ def train(data_dir, model_name, pretrained, optimizer_name):
 		x = Dense(nb_classes, activation='softmax', name='predictions')(x)
 		model = Model(input=base_model.input, output=x)
 
+	if weight_path == "no_weights":
+		pass
+	else:
+		model.load_weights(weight_path)
+
 	# adjust parameters
 	if optimizer_name == 'sgd':
 		sgd = SGD(lr=0.0005, decay=1e-6, momentum=0.9, nesterov=True)
 		optimizer = sgd
 	elif optimizer_name == 'ramsprop':
-		pass
+		optimizer = optimizer_name
 	elif optimizer_name == 'adagrad':
-		pass
+		optimizer = optimizer_name
 	elif optimizer_name == 'adadelta':
-		pass
+		optimizer = optimizer_name
 	elif optimizer_name == 'adam':
-		pass
+		optimizer = optimizer_name
 	elif optimizer_name == 'adamax':
-		pass
+		optimizer = optimizer_name
 	elif optimizer_name == 'nadam':
-		pass
+		optimizer = optimizer_name
 	
 	model.compile(loss='categorical_crossentropy',
-	              optimizer=optimizer_name,
+	              optimizer=optimizer,
 	              metrics=['accuracy'])
 
-	checkpoint = ModelCheckpoint("%s/weights_%s.best.hdf5" % (data_dir, model_name+str(pretrained)+optimizer_name), monitor='val_acc',
-	                             verbose=1, save_best_only=True, mode='max')
-	callbacks_list = [checkpoint]
 	X_train = X_train.astype('float32')
 	X_valid = X_valid.astype('float32')
 	X_train /= 255
 	X_valid /= 255
+
+	checkpoint = ModelCheckpoint("%s/weights_%s.best.hdf5" % (data_dir, model_name+str(pretrained)+optimizer_name), monitor='val_acc',
+	                             verbose=1, save_best_only=True, mode='max')
+	per_class_metric = PerClassMetric(X_valid, Y_valid, batch_size)
+	callbacks_list = [checkpoint, per_class_metric]
 
 	if not data_augmentation:
 		print('Not using data augmentation.')
@@ -102,6 +111,12 @@ def train(data_dir, model_name, pretrained, optimizer_name):
 			nb_epoch=nb_epoch,
 			validation_data=(X_valid, Y_valid),
 			shuffle=True, callbacks=callbacks_list)
+		all_predictions = per_class_metric.all_predictions
+		all_recalls = per_class_metric.all_recalls
+		for i in range(nb_epoch):
+			print("this is the %d epoch" % i)
+			print(all_predictions[i])
+			print(all_recalls[i])
 	else:
 		print('Using real-time data augmentation.')
 		# This will do preprocessing and realtime data augmentation:
@@ -128,11 +143,12 @@ def train(data_dir, model_name, pretrained, optimizer_name):
 			nb_epoch=nb_epoch, verbose=2, max_q_size=1000)
 
 if __name__ == '__main__':
-	if len(sys.argv) != 5:
-		print('USAGE: python train.py <data_dir> <model_name> <pretrained> <optimizer_name>')
+	if len(sys.argv) != 6:
+		print('USAGE: python train.py <data_dir> <model_name> <pretrained> <optimizer_name> <weight_path>')
 	else:
 		data_dir = sys.argv[1]
 		model_name = sys.argv[2]
 		pretrained = sys.argv[3]
 		optimizer_name = sys.argv[4]
-		train(data_dir, model_name, int(pretrained), optimizer_name)
+		weight_path = sys.argv[5]
+		train(data_dir, model_name, int(pretrained), optimizer_name, weight_path)
